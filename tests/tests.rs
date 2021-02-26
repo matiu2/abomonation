@@ -87,6 +87,41 @@ fn test_macro() {
     }
 }
 
+use crate::abomonated::Abomonated;
+enum MyStructWrap {
+    Original(MyStruct),
+    Abomonated(Abomonated<MyStruct, Vec<u8>>),
+}
+use std::ops::Deref;
+
+impl Deref for MyStructWrap {
+    type Target = MyStruct;
+    fn deref(&self) -> &Self::Target {
+        match self {
+            Self::Original(m) => m,
+            Self::Abomonated(a) => &*a,
+        }
+    }
+}
+
+fn de<'a>(bytes: Vec<u8>) -> MyStructWrap {
+    MyStructWrap::Abomonated(unsafe { Abomonated::new(bytes) }.unwrap())
+}
+
+#[test]
+fn test_abominated_enum() {
+    // create some test data out of abomonation-approved types
+    let record = MyStruct{ a: "test".to_owned(), b: 0, c: vec![0, 1, 2] };
+
+    // encode vector into a Vec<u8>
+    let mut bytes = Vec::new();
+    unsafe { encode(&record, &mut bytes).unwrap(); }
+    let b = bytes.clone();
+
+    let result = de(bytes);
+    assert!(*result == record);
+}
+
 #[test]
 fn test_macro_size() {
     // create some test data out of abomonation-approved types
