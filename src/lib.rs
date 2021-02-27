@@ -551,3 +551,106 @@ mod network {
     impl Abomonation for SocketAddrV4 { }
     impl Abomonation for SocketAddrV6 { }
 }
+
+mod std_collections {
+    use Abomonation;
+    use std::collections::HashMap;
+    use std::io::Write;
+    use std::io::Result as IOResult;
+
+    struct RandomState {
+        k0: u64,
+        k1: u64,
+    }
+    impl Abomonation for RandomState {}
+
+    struct StdHashMap<K, V> {
+        base: HashbrownHashMap<K, V>,
+    }
+
+    struct HashbrownHashMap<K, V> {
+        hash_builder: RandomState,
+        table: RawTable<(K, V)>,
+    }
+
+    use std::ptr::NonNull;
+    use std::marker::PhantomData;
+
+    struct RawTable<T> {
+        bucket_mask: usize,
+        ctrl: NonNull<u8>,
+        growth_left: usize,
+        items: usize,
+        marker: PhantomData<T>
+    }
+
+    impl<T> RawTable<T> {
+        #[inline]
+        fn num_ctrl_bytes(&self) -> usize {
+            self.bucket_mask + 1 + 16
+        }
+
+        #[inline]
+        unsafe fn ctrl(&self, index: usize) -> *mut u8 {
+            debug_assert!(index < self.num_ctrl_bytes());
+            self.ctrl.as_ptr().add(index)
+        }
+    }
+
+    impl<T: Abomonation> Abomonation for RawTable<T> {
+        #[inline]
+        unsafe fn entomb<W: Write>(&self, write: &mut W) -> IOResult<()> {
+            write.write_all(std::slice::from_raw_parts(self.ctrl(0), self.num_ctrl_bytes()));
+            Ok(())
+        }
+
+        #[inline]
+        unsafe fn exhume<'a,'b>(&'a mut self, bytes: &'b mut [u8]) -> Option<&'b mut [u8]> { Some(bytes) }
+
+        #[inline]
+        fn extent(&self) -> usize { 0 }
+    }
+
+    impl<K: Abomonation, V: Abomonation> Abomonation for StdHashMap<K, V> {
+        #[inline]
+        unsafe fn entomb<W: Write>(&self, write: &mut W) -> IOResult<()> {
+            self.base.table.entomb(write)?;
+            Ok(())
+        }
+
+        #[inline]
+        unsafe fn exhume<'a,'b>(&'a mut self, mut bytes: &'b mut [u8]) -> Option<&'b mut [u8]> {
+            let temp = bytes;
+            bytes = self.base.table.exhume(temp)?;
+            Some(bytes)
+        }
+
+        #[inline]
+        fn extent(&self) -> usize {
+            self.base.table.extent()
+        }
+    }
+
+    impl<K: Abomonation, V: Abomonation> Abomonation for HashMap<K, V> {
+        #[inline]
+        unsafe fn entomb<W: Write>(&self, write: &mut W) -> IOResult<()> {
+            let hash_map: &StdHashMap<K, V> = std::mem::transmute(self);
+            (*hash_map).entomb(write)?;
+            Ok(())
+        }
+
+        #[inline]
+        unsafe fn exhume<'a,'b>(&'a mut self, mut bytes: &'b mut [u8]) -> Option<&'b mut [u8]> {
+            let temp = bytes;
+            let hash_map: &mut StdHashMap<K, V> = std::mem::transmute(self);
+            bytes = (*hash_map).base.table.exhume(temp)?;
+            Some(bytes)
+        }
+
+        #[inline]
+        fn extent(&self) -> usize {
+            let hash_map: &StdHashMap<K, V> = unsafe { std::mem::transmute(self) };
+            (*hash_map).base.table.extent()
+        }
+    }
+}
