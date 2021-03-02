@@ -978,7 +978,16 @@ mod std_collections {
         }
 
         #[inline]
-        fn extent(&self) -> usize { 0 }
+        fn extent(&self) -> usize {
+            let mut ret = self.num_ctrl_bytes();
+            unsafe {
+                for from in self.iter() {
+                    ret += mem::size_of::<usize>();
+                    ret += from.as_ref().extent();
+                }
+            }
+            ret
+        }
     }
 
     impl<K: Abomonation, V: Abomonation> Abomonation for StdHashMap<K, V> {
