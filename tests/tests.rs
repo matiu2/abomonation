@@ -163,3 +163,24 @@ fn test_net_types() {
     let (t, r) = unsafe { decode::<SocketAddr>(&mut bytes) }.unwrap(); assert!(*t == socket_addr4);
     let (t, _r) = unsafe { decode::<SocketAddr>(r) }.unwrap(); assert!(*t == socket_addr6);
 }
+
+#[test]
+fn test_hash_map() {
+    use std::collections::HashMap;
+
+    let mut h = HashMap::new();
+    h.insert("aaa".to_string(), 3);
+    h.insert("bbb".to_string(), 4);
+    let mut bytes = Vec::new();
+    unsafe { encode(&h, &mut bytes).unwrap(); }
+    let (t, r) = unsafe { decode::<HashMap<String, i32>>(&mut bytes) }.unwrap(); assert!(*t == h);
+//    assert!(r.len() == 0);
+
+    let mut h2 = HashMap::new();
+    h2.insert("aaa".to_string(), "3".to_string());
+    h2.insert("bbb".to_string(), "4".to_string());
+    let mut bytes = Vec::new();
+    unsafe { encode(&h2, &mut bytes).unwrap(); }
+    let (t, r) = unsafe { decode::<HashMap<String, String>>(&mut bytes) }.unwrap(); assert!(*t == h2);
+//    assert!(r.len() == 0);
+}
