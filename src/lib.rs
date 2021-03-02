@@ -557,6 +557,35 @@ mod std_collections {
     use std::collections::HashMap;
     use std::io::Write;
     use std::io::Result as IOResult;
+    use std::ptr::NonNull;
+    use std::mem;
+    use std::marker::PhantomData;
+    use std::alloc::Layout;
+    use std::hint;
+    use encode;
+    use decode;
+
+    unsafe fn offset_from<T>(to: *const T, from: *const T) -> usize {
+        to.offset_from(from) as usize
+    }
+
+    #[inline]
+    fn calculate_layout<T>(buckets: usize) -> Option<(Layout, usize)> {
+//        debug_assert!(buckets.is_power_of_two());
+
+        // Manual layout calculation since Layout methods are not yet stable.
+        let ctrl_align = usize::max(mem::align_of::<T>(), Group::WIDTH);
+        let ctrl_offset = mem::size_of::<T>()
+            .checked_mul(buckets)?
+            .checked_add(ctrl_align - 1)?
+            & !(ctrl_align - 1);
+        let len = ctrl_offset.checked_add(buckets + Group::WIDTH)?;
+
+        Some((
+            unsafe { Layout::from_size_align_unchecked(len, ctrl_align) },
+            ctrl_offset,
+        ))
+    }
 
     struct RandomState {
         k0: u64,
@@ -573,8 +602,6 @@ mod std_collections {
         table: RawTable<(K, V)>,
     }
 
-    use std::ptr::NonNull;
-    use std::marker::PhantomData;
 
     struct RawTable<T> {
         bucket_mask: usize,
@@ -591,9 +618,332 @@ mod std_collections {
         }
 
         #[inline]
+        pub fn buckets(&self) -> usize {
+            self.bucket_mask + 1
+        }
+
+        #[inline]
+        pub unsafe fn data_end(&self) -> NonNull<T> {
+            NonNull::new_unchecked(self.ctrl.as_ptr() as *mut T)
+        }
+
+        #[inline]
         unsafe fn ctrl(&self, index: usize) -> *mut u8 {
             debug_assert!(index < self.num_ctrl_bytes());
             self.ctrl.as_ptr().add(index)
+        }
+
+        #[inline]
+        pub unsafe fn iter(&self) -> RawIter<T> {
+            let data = Bucket::from_base_index(self.data_end(), 0);
+            RawIter {
+                iter: RawIterRange::new(self.ctrl.as_ptr(), data, self.buckets()),
+                items: self.items,
+            }
+        }
+
+        #[inline]
+        fn is_empty_singleton(&self) -> bool {
+            self.bucket_mask == 0
+        }
+
+        #[inline]
+        pub(crate) fn into_alloc(self) -> Option<(NonNull<u8>, Layout)> {
+            let alloc = if self.is_empty_singleton() {
+                None
+            } else {
+                // Avoid `Option::unwrap_or_else` because it bloats LLVM IR.
+                let (layout, ctrl_offset) = match calculate_layout::<T>(self.buckets()) {
+                    Some(lco) => lco,
+                    None => unsafe { hint::unreachable_unchecked() },
+                };
+                Some((
+                    unsafe { NonNull::new_unchecked(self.ctrl.as_ptr().sub(ctrl_offset)) },
+                    layout,
+                ))
+            };
+            mem::forget(self);
+            alloc
+        }
+
+        #[inline]
+        pub unsafe fn into_iter_from(self, iter: RawIter<T>) -> RawIntoIter<T> {
+//            debug_assert_eq!(iter.len(), self.len());
+
+            let alloc = self.into_alloc();
+            RawIntoIter {
+                iter,
+                alloc,
+                marker: PhantomData,
+            }
+        }
+
+        #[inline]
+        pub unsafe fn bucket_index(&self, bucket: &Bucket<T>) -> usize {
+            bucket.to_base_index(self.data_end())
+        }
+
+        #[inline]
+        pub unsafe fn bucket(&self, index: usize) -> Bucket<T> {
+            debug_assert_ne!(self.bucket_mask, 0);
+            debug_assert!(index < self.buckets());
+            Bucket::from_base_index(self.data_end(), index)
+        }
+    }
+
+    pub struct RawIntoIter<T> {
+        iter: RawIter<T>,
+        alloc: Option<(NonNull<u8>, Layout)>,
+        marker: PhantomData<T>,
+    }
+
+    impl<T> IntoIterator for RawTable<T> {
+        type Item = T;
+        type IntoIter = RawIntoIter<T>;
+
+        #[inline]
+        fn into_iter(self) -> RawIntoIter<T> {
+            unsafe {
+                let iter = self.iter();
+                self.into_iter_from(iter)
+            }
+        }
+    }
+
+    impl<T> Iterator for RawIntoIter<T> {
+        type Item = T;
+
+        #[inline]
+        fn next(&mut self) -> Option<T> {
+            unsafe { Some(self.iter.next()?.read()) }
+        }
+
+        #[inline]
+        fn size_hint(&self) -> (usize, Option<usize>) {
+            self.iter.size_hint()
+        }
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    use std::arch::x86_64 as x86;
+    pub type BitMaskWord = u16;
+    #[derive(Copy, Clone)]
+    pub struct BitMask(pub BitMaskWord);
+    pub const BITMASK_MASK: BitMaskWord = 0xffff;
+    pub const BITMASK_STRIDE: usize = 1;
+    impl BitMask {
+        /// Returns a new `BitMask` with all bits inverted.
+        #[inline]
+        pub fn invert(self) -> Self {
+            BitMask(self.0 ^ BITMASK_MASK)
+        }
+        #[inline]
+        pub fn lowest_set_bit(self) -> Option<usize> {
+            if self.0 == 0 {
+                None
+            } else {
+                Some(unsafe { self.lowest_set_bit_nonzero() })
+            }
+        }
+        #[inline]
+        pub unsafe fn lowest_set_bit_nonzero(self) -> usize {
+            self.trailing_zeros()
+        }
+
+        #[inline]
+        pub fn trailing_zeros(self) -> usize {
+            self.0.trailing_zeros() as usize / BITMASK_STRIDE
+        }
+
+        #[inline]
+        pub fn remove_lowest_bit(self) -> Self {
+            BitMask(self.0 & (self.0 - 1))
+        }
+    }
+
+    #[derive(Copy, Clone)]
+    pub struct Group(x86::__m128i);
+    impl Group {
+        /// Number of bytes in the group.
+        pub const WIDTH: usize = mem::size_of::<Self>();
+        #[inline]
+        pub unsafe fn load_aligned(ptr: *const u8) -> Self {
+            // FIXME: use align_offset once it stabilizes
+            debug_assert_eq!(ptr as usize & (mem::align_of::<Self>() - 1), 0);
+            Group(x86::_mm_load_si128(ptr as *const _))
+        }
+        #[inline]
+        pub fn match_full(&self) -> BitMask {
+            self.match_empty_or_deleted().invert()
+        }
+        #[inline]
+        pub fn match_empty_or_deleted(self) -> BitMask {
+            unsafe {
+                // A byte is EMPTY or DELETED iff the high bit is set
+                BitMask(x86::_mm_movemask_epi8(self.0) as u16)
+            }
+        }
+    }
+
+    pub(crate) struct RawIterRange<T> {
+        current_group: BitMask,
+        data: Bucket<T>,
+        next_ctrl: *const u8,
+        end: *const u8,
+    }
+
+    impl<T> RawIterRange<T> {
+        #[inline]
+        unsafe fn new(ctrl: *const u8, data: Bucket<T>, len: usize) -> Self {
+            debug_assert_ne!(len, 0);
+            debug_assert_eq!(ctrl as usize % Group::WIDTH, 0);
+            let end = ctrl.add(len);
+
+            // Load the first group and advance ctrl to point to the next group
+            let current_group = Group::load_aligned(ctrl).match_full();
+            let next_ctrl = ctrl.add(Group::WIDTH);
+
+            Self {
+                current_group,
+                data,
+                next_ctrl,
+                end,
+            }
+        }
+    }
+
+    impl<T> Iterator for RawIterRange<T> {
+        type Item = Bucket<T>;
+
+        fn next(&mut self) -> Option<Bucket<T>> {
+            unsafe {
+                loop {
+                    if let Some(index) = self.current_group.lowest_set_bit() {
+                        self.current_group = self.current_group.remove_lowest_bit();
+                        return Some(self.data.next_n(index));
+                    }
+
+                    if self.next_ctrl >= self.end {
+                        return None;
+                    }
+
+                    // We might read past self.end up to the next group boundary,
+                    // but this is fine because it only occurs on tables smaller
+                    // than the group size where the trailing control bytes are all
+                    // EMPTY. On larger tables self.end is guaranteed to be aligned
+                    // to the group size (since tables are power-of-two sized).
+                    self.current_group = Group::load_aligned(self.next_ctrl).match_full();
+                    self.data = self.data.next_n(Group::WIDTH);
+                    self.next_ctrl = self.next_ctrl.add(Group::WIDTH);
+                }
+            }
+        }
+
+        #[inline]
+        fn size_hint(&self) -> (usize, Option<usize>) {
+            // We don't have an item count, so just guess based on the range size.
+            (
+                0,
+                Some(unsafe { offset_from(self.end, self.next_ctrl) + Group::WIDTH }),
+            )
+        }
+    }
+
+    pub struct Bucket<T> {
+        ptr: NonNull<T>,
+    }
+
+    impl<T> Clone for Bucket<T> {
+        #[inline]
+        fn clone(&self) -> Self {
+            Self { ptr: self.ptr }
+        }
+    }
+
+    impl<T> Bucket<T> {
+        #[inline]
+        unsafe fn from_base_index(base: NonNull<T>, index: usize) -> Self {
+            let ptr = if std::mem::size_of::<T>() == 0 {
+                // won't overflow because index must be less than length
+                (index + 1) as *mut T
+            } else {
+                base.as_ptr().sub(index)
+            };
+            Self {
+                ptr: NonNull::new_unchecked(ptr),
+            }
+        }
+
+        #[inline]
+        unsafe fn next_n(&self, offset: usize) -> Self {
+            let ptr = if mem::size_of::<T>() == 0 {
+                (self.ptr.as_ptr() as usize + offset) as *mut T
+            } else {
+                self.ptr.as_ptr().sub(offset)
+            };
+            Self {
+                ptr: NonNull::new_unchecked(ptr),
+            }
+        }
+
+        #[inline]
+        pub unsafe fn read(&self) -> T {
+            self.as_ptr().read()
+        }
+        #[inline]
+        pub unsafe fn write(&self, val: T) {
+            self.as_ptr().write(val);
+        }
+        #[inline]
+        pub unsafe fn as_ref<'a>(&self) -> &'a T {
+            &*self.as_ptr()
+        }
+
+        #[inline]
+        pub unsafe fn as_ptr(&self) -> *mut T {
+            if mem::size_of::<T>() == 0 {
+                // Just return an arbitrary ZST pointer which is properly aligned
+                mem::align_of::<T>() as *mut T
+            } else {
+                self.ptr.as_ptr().sub(1)
+            }
+        }
+
+        #[inline]
+        unsafe fn to_base_index(&self, base: NonNull<T>) -> usize {
+            if mem::size_of::<T>() == 0 {
+                self.ptr.as_ptr() as usize - 1
+            } else {
+                offset_from(base.as_ptr(), self.ptr.as_ptr())
+            }
+        }
+    }
+
+    pub struct RawIter<T> {
+        iter: RawIterRange<T>,
+        items: usize,
+    }
+
+    impl<T> Iterator for RawIter<T> {
+        type Item = Bucket<T>;
+
+        #[inline]
+        fn next(&mut self) -> Option<Bucket<T>> {
+            if let Some(b) = self.iter.next() {
+                self.items -= 1;
+                Some(b)
+            } else {
+                // We don't check against items == 0 here to allow the
+                // compiler to optimize away the item count entirely if the
+                // iterator length is never queried.
+                debug_assert_eq!(self.items, 0);
+                None
+            }
+        }
+
+        #[inline]
+        fn size_hint(&self) -> (usize, Option<usize>) {
+            (self.items, Some(self.items))
         }
     }
 
@@ -601,11 +951,31 @@ mod std_collections {
         #[inline]
         unsafe fn entomb<W: Write>(&self, write: &mut W) -> IOResult<()> {
             write.write_all(std::slice::from_raw_parts(self.ctrl(0), self.num_ctrl_bytes()));
+            for from in self.iter() {
+                let index = self.bucket_index(&from);
+                encode(&index, write)?;
+                encode(from.as_ref(), write)?;
+            }
             Ok(())
         }
 
         #[inline]
-        unsafe fn exhume<'a,'b>(&'a mut self, bytes: &'b mut [u8]) -> Option<&'b mut [u8]> { Some(bytes) }
+        unsafe fn exhume<'a,'b>(&'a mut self, bytes: &'b mut [u8]) -> Option<&'b mut [u8]> {
+            if self.num_ctrl_bytes() > bytes.len() { return None; }
+            else {
+                let (ctrl_bytes, mut rest) = bytes.split_at_mut(self.num_ctrl_bytes());
+                self.ctrl(0).copy_from_nonoverlapping(ctrl_bytes.as_ptr(), self.num_ctrl_bytes());
+                for _ in 0..self.items {
+                    let (index, temp) = decode::<usize>(rest)?;
+                    rest = temp;
+                    let (from, temp) = decode::<T>(rest)?;
+                    rest = temp;
+                    let mut to = self.bucket(*index);
+                    to.ptr = NonNull::new_unchecked(from as *const T as *mut T);
+                }
+            }
+            Some(bytes)
+        }
 
         #[inline]
         fn extent(&self) -> usize { 0 }
