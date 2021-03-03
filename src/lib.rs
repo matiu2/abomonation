@@ -72,9 +72,12 @@ pub mod abomonated;
 ///
 #[inline]
 pub unsafe fn encode<T: Abomonation, W: Write>(typed: &T, write: &mut W) -> IOResult<()> {
+    println!("doing encode");
     let slice = std::slice::from_raw_parts(mem::transmute(typed), mem::size_of::<T>());
+    println!("slice {:?}", &slice);
     write.write_all(slice)?;
     typed.entomb(write)?;
+    println!("done encode");
     Ok(())
 }
 
@@ -947,34 +950,61 @@ mod std_collections {
         }
     }
 
-    impl<T: Abomonation> Abomonation for RawTable<T> {
+    impl<T: Abomonation + std::fmt::Debug> Abomonation for RawTable<T> {
         #[inline]
         unsafe fn entomb<W: Write>(&self, write: &mut W) -> IOResult<()> {
+            println!("start entomb");
+            println!("ctrl bytes {:?}", std::slice::from_raw_parts(self.ctrl(0), self.num_ctrl_bytes()));
             write.write_all(std::slice::from_raw_parts(self.ctrl(0), self.num_ctrl_bytes()));
             for from in self.iter() {
                 let index = self.bucket_index(&from);
                 encode(&index, write)?;
+                println!("index {:?}", index);
+                println!("from now ptr: {:?}", from.as_ptr());
+
+                // !!! from.as_ref() success in a valid hashmap, but, when try to re encode a hashmap
+                // obtained from decode a abomonated hashmap, this cause SIGSEGV,
+                // encode might be correct: it includes all keys and values abomonated
+                // but decode must be wrong, doesn't form a valid hashmap
+                println!("from now: {:?}", from.as_ref());
+
                 encode(from.as_ref(), write)?;
+                println!("bucket {:?}", from.as_ref());
             }
+            println!("done entomb");
             Ok(())
         }
 
         #[inline]
         unsafe fn exhume<'a,'b>(&'a mut self, bytes: &'b mut [u8]) -> Option<&'b mut [u8]> {
-            if self.num_ctrl_bytes() > bytes.len() { return None; }
+            if self.num_ctrl_bytes() > bytes.len() {
+                return None; }
             else {
                 let (ctrl_bytes, mut rest) = bytes.split_at_mut(self.num_ctrl_bytes());
-                self.ctrl(0).copy_from_nonoverlapping(ctrl_bytes.as_ptr(), self.num_ctrl_bytes());
-                for _ in 0..self.items {
+                ctrl_bytes.as_ptr();
+                println!("exhume ctrl bytes {:?} {:?} {:?}", &ctrl_bytes, *ctrl_bytes.as_ptr(), *(ctrl_bytes.as_ptr().add(self.num_ctrl_bytes()-1)));
+
+                self.ctrl = NonNull::new_unchecked(ctrl_bytes.as_ptr() as *mut u8);
+                println!("items in exhume {}", self.items);
+                for i in 0..self.items {
+                    println!("item {}", i);
                     let (index, temp) = decode::<usize>(rest)?;
                     rest = temp;
                     let (from, temp) = decode::<T>(rest)?;
                     rest = temp;
                     let mut to = self.bucket(*index);
-                    to.ptr = NonNull::new_unchecked(from as *const T as *mut T);
+                    println!("from ptr deref {:?}", *(from as *const T as *mut T));
+                    to.ptr = NonNull::new_unchecked((from as *const T as *mut T).add(1));
+                    println!("target bucket set to {:?}", to.as_ref());
+
+                    println!("item {} done", i);
+
                 }
+                // below is essentially return Some(rest), but just for work around stupid lifetime checker
+                let l = rest.len();
+                let total_len = bytes.len();
+                Some(&mut bytes[total_len-l..])
             }
-            Some(bytes)
         }
 
         #[inline]
@@ -990,7 +1020,7 @@ mod std_collections {
         }
     }
 
-    impl<K: Abomonation, V: Abomonation> Abomonation for StdHashMap<K, V> {
+    impl<K: Abomonation + std::fmt::Debug, V: Abomonation + std::fmt::Debug> Abomonation for StdHashMap<K, V> {
         #[inline]
         unsafe fn entomb<W: Write>(&self, write: &mut W) -> IOResult<()> {
             self.base.table.entomb(write)?;
@@ -1010,7 +1040,7 @@ mod std_collections {
         }
     }
 
-    impl<K: Abomonation, V: Abomonation> Abomonation for HashMap<K, V> {
+    impl<K: Abomonation + std::fmt::Debug, V: Abomonation + std::fmt::Debug> Abomonation for HashMap<K, V> {
         #[inline]
         unsafe fn entomb<W: Write>(&self, write: &mut W) -> IOResult<()> {
             let hash_map: &StdHashMap<K, V> = std::mem::transmute(self);
