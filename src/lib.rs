@@ -72,12 +72,9 @@ pub mod abomonated;
 ///
 #[inline]
 pub unsafe fn encode<T: Abomonation, W: Write>(typed: &T, write: &mut W) -> IOResult<()> {
-    println!("doing encode");
     let slice = std::slice::from_raw_parts(mem::transmute(typed), mem::size_of::<T>());
-    println!("slice {:?}", &slice);
     write.write_all(slice)?;
     typed.entomb(write)?;
-    println!("done encode");
     Ok(())
 }
 
@@ -959,86 +956,42 @@ mod std_collections {
     impl<T: Abomonation + std::fmt::Debug + Default> Abomonation for RawTable<T> {
         #[inline]
         unsafe fn entomb<W: Write>(&self, write: &mut W) -> IOResult<()> {
-            println!("start entomb");
-            println!("ctrl bytes {:?} ctrl {:?}", std::slice::from_raw_parts(self.ctrl(0), self.num_ctrl_bytes()), self.ctrl);
-            let mut write2: Vec<u8> = Vec::new();
-            let mut write3: Vec<u8> = Vec::new();
             let size = mem::size_of::<T>();
-
-            for i in 0..self.buckets() {
-                let index = self.bucket_index(&self.bucket(i));
-                assert!(index == i);
-                println!("bucket: {:?}, index: {:?}", self.bucket(i), index);
-//                let slice = std::slice::from_raw_parts(mem::transmute::<&T, *const u8>(&Default::default()), size);
-//                write2.write_all(slice)?;
-                write2.write_all(&vec![0; std::mem::size_of::<T>()])?;
-            }
             let buckets = self.buckets();
-            println!("====== {:?}", buckets);
+            let mut write2: Vec<u8> = vec![0; size*buckets];
+            let mut write3: Vec<u8> = Vec::new();
+
             for from in self.iter() {
                 let index = self.bucket_index(&from);
-                println!("index: {:?} bucket {:?} as ptr: {:?}", index, from, from.as_ptr());
-                println!("bucket as ref {:?}", from.as_ref());
-
-                let size = mem::size_of::<T>();
                 let slice = std::slice::from_raw_parts(mem::transmute::<_, *const u8>(from.as_ref()), size);
-
                 write2[(buckets-index-1)*size..(buckets-index)*size].copy_from_slice(slice);
-
                 encode(&index, &mut write3)?;
                 from.as_ref().entomb(&mut write3)?;
-
             }
-            println!("write2: {:?}", write2);
             write.write_all(&write2);
             write.write_all(std::slice::from_raw_parts(self.ctrl(0), self.num_ctrl_bytes()));
             write.write_all(&write3);
-            println!("done entomb");
             Ok(())
         }
 
         #[inline]
         unsafe fn exhume<'a,'b>(&'a mut self, bytes: &'b mut [u8]) -> Option<&'b mut [u8]> {
             if self.num_ctrl_bytes() > bytes.len() {
-                return None; }
-            else {
+                return None;
+            } else {
                 let size = mem::size_of::<T>();
                 let (_buckets, mut rest) = bytes.split_at_mut(self.buckets() * size);
                 let (ctrl_bytes, temp) = rest.split_at_mut(self.num_ctrl_bytes());
                 rest = temp;
                 self.ctrl = NonNull::new_unchecked(ctrl_bytes.as_ptr() as *mut u8);
-                println!("exhume ctrl bytes {:?} {:?}", &ctrl_bytes, ctrl_bytes.as_ptr());
-                println!("items in exhume {}", self.items);
-                println!("rest: {:?}", rest);
                 for i in 0..self.items {
                     let (index, temp) = decode::<usize>(rest)?;
-                    println!("temp1: {:?}", temp);
                     rest = temp;
-                    println!("bucket as raw {:?}", std::slice::from_raw_parts(mem::transmute::<_, *const u8>(self.bucket(*index).as_ref()), size));
-//                    println!("index: {:?}, bucket: {:?}, bucket as ref: {:?}", index, self.bucket(*index), self.bucket(*index).as_ref());
                     let temp = self.bucket(*index).as_mut().exhume(rest)?;
-                    println!("temp2: {:?}, bucket as ref after exhume {:?}", temp, self.bucket(*index).as_ref());
                     rest = temp;
                 }
-//                for i in 0..self.items {
-//                    let (index, temp) = decode::<usize>(rest)?;
-//                    println!("index {}", index);
-//
-//                    rest = temp;
-//                    let (from, temp) = decode::<T>(rest)?;
-//                    rest = temp;
-//                    let mut to = self.bucket(*index);
-//                    println!("bucket: {:?}", to);
-//                    println!("from ptr {:?} deref {:?}", (from as *const T as *mut T), *(from as *const T as *mut T));
-//                    to.ptr = NonNull::new_unchecked((from as *const T as *mut T).add(1));
-//                    println!("target bucket set to {:?}, bucket: {:?}, as_ptr: {:?}", to.as_ref(), to, to.as_ptr());
-//                    println!("item {} done", i);
-//
-//                    let mut to = self.bucket(*index);
-//                    println!("retry bucket: {:?}", to);
-//
-//                }
-                // below is essentially return Some(rest), but just for work around stupid lifetime checker
+
+                // below is essentially return Some(rest), but Some(rest) doesn't pass lifetime checker
                 let l = rest.len();
                 let total_len = bytes.len();
                 Some(&mut bytes[total_len-l..])

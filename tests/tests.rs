@@ -169,62 +169,19 @@ fn test_hash_map() {
     use std::collections::HashMap;
 
     let mut h = HashMap::new();
-    h.insert("aaa".to_string(), 3);
-    h.insert("bbb".to_string(), 4);
+    h.insert("aaaaa".to_string(), "3".to_string());
+    h.insert("bbbbbb".to_string(), "4".to_string());
     let mut bytes = Vec::new();
     unsafe { encode(&h, &mut bytes).unwrap(); }
-    println!("{:?}", &bytes);
-    let (t, r) = unsafe { decode::<HashMap<String, i32>>(&mut bytes) }.unwrap();
-    println!("{:?}", t);
-    println!("{:?}", &r);
-
-    assert!(r.len() == 0);
-
-    let mut bytes = Vec::new();
-    println!("start re encode");
-    unsafe { encode(t, &mut bytes).unwrap(); }
-    println!("re encode {:?}", bytes);
-
-    let mut h2 = HashMap::new();
-    h2.insert("aaa".to_string(), "3".to_string());
-    h2.insert("bbb".to_string(), "4".to_string());
-    let mut bytes = Vec::new();
-    unsafe { encode(&h2, &mut bytes).unwrap(); }
     let (t, r) = unsafe { decode::<HashMap<String, String>>(&mut bytes) }.unwrap();
-    println!("{:?}", t);
+    std::mem::forget(h);
     assert!(r.len() == 0);
-}
+    assert!(t.len() == 2);
+    assert!(t.get("aaaaa") == Some(&"3".to_string()));
+    assert!(t.get("bbbbbb") == Some(&"4".to_string()));
 
-#[test]
-fn test_tuple_string_i32() {
-//    let x = 3;
-//    let x = "aaa".to_string();
-    let x = ("aaa".to_string(), 3);
-    let mut bytes = Vec::new();
-    unsafe { encode(&x, &mut bytes).unwrap(); }
-    println!("{:?}", bytes);
-
-}
-
-#[test]
-fn test_decode_string() {
-    let mut bytes: Vec<u8> = vec![192, 64, 64, 41, 182, 127, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 97, 97, 97];
-//    [96, 58, 192, 138, 192, 127, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 255, 127, 0, 0, 97, 97, 97];
-    let (t, r) = unsafe { decode::<(String, i32)>(&mut bytes) }.unwrap();
-    println!("{:?}", t);
-}
-
-#[test]
-fn test_hm() {
-    use std::collections::HashMap;
-
-    let mut bytes: Vec<u8> = vec![102, 203, 77, 73, 207, 207, 73, 245, 92, 54, 138, 212, 0, 87, 169, 110, 3, 0, 0, 0, 0, 0, 0, 0, 48, 77, 192, 79, 195, 127, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 192, 64, 192, 79, 195, 127, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 16, 78, 192, 79, 195, 127, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 22, 7, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 22, 7, 255, 255, 0, 0, 0, 0, 0, 0, 0, 0, 97, 97, 97, 1, 0, 0, 0, 0, 0, 0, 0, 98, 98, 98];
-    let (t, r) = unsafe { decode::<HashMap<String, i32>>(&mut bytes) }.unwrap();
-    println!("done decode. remains {:?}", r);
-
-    let mut bytes = Vec::new();
-    unsafe { encode(t, &mut bytes).unwrap(); }
-    println!("re encode {:?}", bytes);
-
-    println!("{:?}", t.values());
+    // Test re-encode
+    let mut bytes2 = Vec::new();
+    unsafe { encode(t, &mut bytes2).unwrap(); }
+    assert!(bytes == bytes2);
 }
