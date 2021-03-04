@@ -969,11 +969,12 @@ mod std_collections {
                 let index = self.bucket_index(&self.bucket(i));
                 assert!(index == i);
                 println!("bucket: {:?}, index: {:?}", self.bucket(i), index);
-                let slice = std::slice::from_raw_parts(mem::transmute::<&T, *const u8>(&Default::default()), size);
-                write2.write_all(slice)?;
-
-//                write2.write_all(&vec![0; std::mem::size_of::<T>()])?;
+//                let slice = std::slice::from_raw_parts(mem::transmute::<&T, *const u8>(&Default::default()), size);
+//                write2.write_all(slice)?;
+                write2.write_all(&vec![0; std::mem::size_of::<T>()])?;
             }
+            let buckets = self.buckets();
+            println!("====== {:?}", buckets);
             for from in self.iter() {
                 let index = self.bucket_index(&from);
                 println!("index: {:?} bucket {:?} as ptr: {:?}", index, from, from.as_ptr());
@@ -981,12 +982,14 @@ mod std_collections {
 
                 let size = mem::size_of::<T>();
                 let slice = std::slice::from_raw_parts(mem::transmute::<_, *const u8>(from.as_ref()), size);
-                write2[index*size..(index+1)*size].copy_from_slice(slice);
+
+                write2[(buckets-index-1)*size..(buckets-index)*size].copy_from_slice(slice);
 
                 encode(&index, &mut write3)?;
                 from.as_ref().entomb(&mut write3)?;
 
             }
+            println!("write2: {:?}", write2);
             write.write_all(&write2);
             write.write_all(std::slice::from_raw_parts(self.ctrl(0), self.num_ctrl_bytes()));
             write.write_all(&write3);
@@ -1011,7 +1014,8 @@ mod std_collections {
                     let (index, temp) = decode::<usize>(rest)?;
                     println!("temp1: {:?}", temp);
                     rest = temp;
-                    println!("index: {:?}, bucket: {:?}, bucket as ref: {:?}", index, self.bucket(*index), self.bucket(*index).as_ref());
+                    println!("bucket as raw {:?}", std::slice::from_raw_parts(mem::transmute::<_, *const u8>(self.bucket(*index).as_ref()), size));
+//                    println!("index: {:?}, bucket: {:?}, bucket as ref: {:?}", index, self.bucket(*index), self.bucket(*index).as_ref());
                     let temp = self.bucket(*index).as_mut().exhume(rest)?;
                     println!("temp2: {:?}, bucket as ref after exhume {:?}", temp, self.bucket(*index).as_ref());
                     rest = temp;
