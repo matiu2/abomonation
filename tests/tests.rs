@@ -175,23 +175,22 @@ fn test_hash_map() {
     unsafe { encode(&h, &mut bytes).unwrap(); }
     println!("{:?}", &bytes);
     let (t, r) = unsafe { decode::<HashMap<String, i32>>(&mut bytes) }.unwrap();
-//    assert!(*t == h);
-//    println!("{:?}", t);
-//    println!("{:?}", &r);
+    println!("{:?}", t);
+    println!("{:?}", &r);
 
     assert!(r.len() == 0);
 
-    let mut bytes = Vec::new();
-    println!("start re encode");
-    unsafe { encode(t, &mut bytes).unwrap(); }
-    println!("re encode {:?}", bytes);
-
+//    let mut bytes = Vec::new();
+//    println!("start re encode");
+//    unsafe { encode(t, &mut bytes).unwrap(); }
+//    println!("re encode {:?}", bytes);
+//
 //    let mut h2 = HashMap::new();
 //    h2.insert("aaa".to_string(), "3".to_string());
 //    h2.insert("bbb".to_string(), "4".to_string());
 //    let mut bytes = Vec::new();
 //    unsafe { encode(&h2, &mut bytes).unwrap(); }
-//    let (t, r) = unsafe { decode::<HashMap<String, String>>(&mut bytes) }.unwrap(); assert!(*t == h2);
+//    let (t, r) = unsafe { decode::<HashMap<String, String>>(&mut bytes) }.unwrap();
 //    println!("{:?}", t);
 //    assert!(r.len() == 0);
 }
@@ -218,7 +217,7 @@ fn test_decode_string() {
 fn test_hm() {
     use std::collections::HashMap;
 
-    let mut bytes: Vec<u8> = vec![111, 139, 146, 221, 149, 26, 92, 124, 165, 93, 15, 24, 242, 156, 41, 211, 3, 0, 0, 0, 0, 0, 0, 0, 128, 2, 80, 246, 251, 127, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 29, 255, 255, 91, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 29, 255, 255, 91, 0, 0, 0, 0, 0, 0, 0, 0, 160, 2, 80, 246, 251, 127, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 98, 98, 98, 3, 0, 0, 0, 0, 0, 0, 0, 240, 1, 80, 246, 251, 127, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 97, 97, 97];
+    let mut bytes: Vec<u8> = vec![193, 113, 41, 15, 36, 103, 77, 30, 156, 210, 206, 70, 117, 54, 72, 96, 3, 0, 0, 0, 0, 0, 0, 0, 48, 77, 64, 197, 194, 127, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 255, 127, 0, 0, 16, 78, 64, 197, 194, 127, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 192, 64, 64, 197, 194, 127, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 255, 127, 0, 0, 255, 20, 77, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 20, 77, 255, 1, 0, 0, 0, 0, 0, 0, 0, 97, 97, 97, 2, 0, 0, 0, 0, 0, 0, 0, 98, 98, 98];
     let (t, r) = unsafe { decode::<HashMap<String, i32>>(&mut bytes) }.unwrap();
     println!("done decode. remains {:?}", r);
 
