@@ -72,7 +72,7 @@ pub mod abomonated;
 ///
 #[inline]
 pub unsafe fn encode<T: Abomonation, W: Write>(typed: &T, write: &mut W) -> IOResult<()> {
-    let slice = std::slice::from_raw_parts(mem::transmute(typed), mem::size_of::<T>());
+    let slice = std::slice::from_raw_parts(typed as *const T as *const u8, mem::size_of::<T>());
     write.write_all(slice)?;
     typed.entomb(write)?;
     Ok(())
@@ -126,6 +126,7 @@ pub unsafe fn decode<T: Abomonation>(bytes: &mut [u8]) -> Option<(&T, &mut [u8])
     } else {
         let (split1, split2) = bytes.split_at_mut(mem::size_of::<T>());
         let result: &mut T = mem::transmute(split1.get_unchecked_mut(0));
+        #[allow(clippy::manual_map)]
         if let Some(remaining) = result.exhume(split2) {
             Some((result, remaining))
         } else {
@@ -163,6 +164,7 @@ pub trait Abomonation {
     /// Most commonly this is owned data on the other end of pointers in `&self`. The return value
     /// reports any failures in writing to `write`.
     #[inline(always)]
+    #[allow(clippy::missing_safety_doc)]
     unsafe fn entomb<W: Write>(&self, _write: &mut W) -> IOResult<()> {
         Ok(())
     }
@@ -171,7 +173,8 @@ pub trait Abomonation {
     ///
     /// Most commonly this populates pointers with valid references into `bytes`.
     #[inline(always)]
-    unsafe fn exhume<'a, 'b>(&'a mut self, bytes: &'b mut [u8]) -> Option<&'b mut [u8]> {
+    #[allow(clippy::missing_safety_doc)]
+    unsafe fn exhume<'a>(&mut self, bytes: &'a mut [u8]) -> Option<&'a mut [u8]> {
         Some(bytes)
     }
 
@@ -224,7 +227,7 @@ pub trait Abomonation {
 /// }
 /// ```
 #[macro_export]
-#[deprecated(since = "0.5", note = "please use the abomonation_derive crate")]
+#[deprecated(since = "0.5.0", note = "please use the abomonation_derive crate")]
 macro_rules! unsafe_abomonate {
     ($t:ty) => {
         impl Abomonation for $t { }
@@ -259,7 +262,7 @@ macro_rules! tuple_abomonate {
                 Ok(())
             }
             #[allow(non_snake_case)]
-            #[inline(always)] unsafe fn exhume<'a,'b>(&'a mut self, mut bytes: &'b mut [u8]) -> Option<&'b mut [u8]> {
+            #[inline(always)] unsafe fn exhume<'a>(&mut self, mut bytes: &'a mut [u8]) -> Option<&'a mut [u8]> {
                 let ($(ref mut $name,)*) = *self;
                 $( let temp = bytes; bytes = $name.exhume(temp)?; )*
                 Some(bytes)
@@ -323,7 +326,7 @@ impl<T: Abomonation> Abomonation for std::ops::Range<T> {
         Ok(())
     }
     #[inline(always)]
-    unsafe fn exhume<'a, 'b>(&'a mut self, mut bytes: &'b mut [u8]) -> Option<&'b mut [u8]> {
+    unsafe fn exhume<'a>(&mut self, mut bytes: &'a mut [u8]) -> Option<&'a mut [u8]> {
         let tmp = bytes;
         bytes = self.start.exhume(tmp)?;
         let tmp = bytes;
@@ -339,13 +342,13 @@ impl<T: Abomonation> Abomonation for std::ops::Range<T> {
 impl<T: Abomonation> Abomonation for Option<T> {
     #[inline(always)]
     unsafe fn entomb<W: Write>(&self, write: &mut W) -> IOResult<()> {
-        if let &Some(ref inner) = self {
+        if let Some(inner) = self {
             inner.entomb(write)?;
         }
         Ok(())
     }
     #[inline(always)]
-    unsafe fn exhume<'a, 'b>(&'a mut self, mut bytes: &'b mut [u8]) -> Option<&'b mut [u8]> {
+    unsafe fn exhume<'a>(&mut self, mut bytes: &'a mut [u8]) -> Option<&'a mut [u8]> {
         if let &mut Some(ref mut inner) = self {
             let tmp = bytes;
             bytes = inner.exhume(tmp)?;
@@ -361,24 +364,24 @@ impl<T: Abomonation> Abomonation for Option<T> {
 impl<T: Abomonation, E: Abomonation> Abomonation for Result<T, E> {
     #[inline(always)]
     unsafe fn entomb<W: Write>(&self, write: &mut W) -> IOResult<()> {
-        match self {
-            &Ok(ref inner) => inner.entomb(write)?,
-            &Err(ref inner) => inner.entomb(write)?,
+        match *self {
+            Ok(ref inner) => inner.entomb(write)?,
+            Err(ref inner) => inner.entomb(write)?,
         };
         Ok(())
     }
     #[inline(always)]
-    unsafe fn exhume<'a, 'b>(&'a mut self, bytes: &'b mut [u8]) -> Option<&'b mut [u8]> {
-        match self {
-            &mut Ok(ref mut inner) => inner.exhume(bytes),
-            &mut Err(ref mut inner) => inner.exhume(bytes),
+    unsafe fn exhume<'a>(&mut self, bytes: &'a mut [u8]) -> Option<&'a mut [u8]> {
+        match *self {
+            Ok(ref mut inner) => inner.exhume(bytes),
+            Err(ref mut inner) => inner.exhume(bytes),
         }
     }
     #[inline]
     fn extent(&self) -> usize {
-        match self {
-            &Ok(ref inner) => inner.extent(),
-            &Err(ref inner) => inner.extent(),
+        match *self {
+            Ok(ref inner) => inner.extent(),
+            Err(ref inner) => inner.extent(),
         }
     }
 }
@@ -427,10 +430,7 @@ macro_rules! array_abomonate {
                 Ok(())
             }
             #[inline(always)]
-            unsafe fn exhume<'a, 'b>(
-                &'a mut self,
-                mut bytes: &'b mut [u8],
-            ) -> Option<&'b mut [u8]> {
+            unsafe fn exhume<'a>(&mut self, mut bytes: &'a mut [u8]) -> Option<&'a mut [u8]> {
                 for element in self {
                     let tmp = bytes;
                     bytes = element.exhume(tmp)?;
@@ -490,14 +490,18 @@ impl Abomonation for String {
         Ok(())
     }
     #[inline]
-    unsafe fn exhume<'a, 'b>(&'a mut self, bytes: &'b mut [u8]) -> Option<&'b mut [u8]> {
+    unsafe fn exhume<'a>(&mut self, bytes: &'a mut [u8]) -> Option<&'a mut [u8]> {
         if self.len() > bytes.len() {
             None
         } else {
             let (mine, rest) = bytes.split_at_mut(self.len());
             std::ptr::write(
                 self,
-                String::from_raw_parts(mem::transmute(mine.as_ptr()), self.len(), self.len()),
+                String::from_raw_parts(
+                    mem::transmute::<*const u8, *mut u8>(mine.as_ptr()),
+                    self.len(),
+                    self.len(),
+                ),
             );
             Some(rest)
         }
@@ -518,7 +522,7 @@ impl<T: Abomonation> Abomonation for Vec<T> {
         Ok(())
     }
     #[inline]
-    unsafe fn exhume<'a, 'b>(&'a mut self, bytes: &'b mut [u8]) -> Option<&'b mut [u8]> {
+    unsafe fn exhume<'a>(&mut self, bytes: &'a mut [u8]) -> Option<&'a mut [u8]> {
         // extract memory from bytes to back our vector
         let binary_len = self.len() * mem::size_of::<T>();
         if binary_len > bytes.len() {
@@ -551,20 +555,23 @@ impl<T: Abomonation> Abomonation for Box<T> {
     #[inline]
     unsafe fn entomb<W: Write>(&self, bytes: &mut W) -> IOResult<()> {
         bytes.write_all(std::slice::from_raw_parts(
-            mem::transmute(&**self),
+            &**self as *const T as *const u8,
             mem::size_of::<T>(),
         ))?;
         (**self).entomb(bytes)?;
         Ok(())
     }
     #[inline]
-    unsafe fn exhume<'a, 'b>(&'a mut self, bytes: &'b mut [u8]) -> Option<&'b mut [u8]> {
+    unsafe fn exhume<'a>(&mut self, bytes: &'a mut [u8]) -> Option<&'a mut [u8]> {
         let binary_len = mem::size_of::<T>();
         if binary_len > bytes.len() {
             None
         } else {
             let (mine, mut rest) = bytes.split_at_mut(binary_len);
-            std::ptr::write(self, mem::transmute(mine.as_mut_ptr() as *mut T));
+            std::ptr::write(
+                self,
+                mem::transmute::<*mut T, std::boxed::Box<T>>(mine.as_mut_ptr() as *mut T),
+            );
             let temp = rest;
             rest = (**self).exhume(temp)?;
             Some(rest)
@@ -572,17 +579,14 @@ impl<T: Abomonation> Abomonation for Box<T> {
     }
     #[inline]
     fn extent(&self) -> usize {
-        mem::size_of::<T>() + (&**self).extent()
+        mem::size_of::<T>() + (**self).extent()
     }
 }
 
 // This method currently enables undefined behavior, by exposing padding bytes.
 #[inline]
 unsafe fn typed_to_bytes<T>(slice: &[T]) -> &[u8] {
-    std::slice::from_raw_parts(
-        slice.as_ptr() as *const u8,
-        slice.len() * mem::size_of::<T>(),
-    )
+    std::slice::from_raw_parts(slice.as_ptr() as *const u8, std::mem::size_of_val(slice))
 }
 
 mod network {

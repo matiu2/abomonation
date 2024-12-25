@@ -16,11 +16,11 @@ fn test_opt_vec() {
 }
 #[test]
 fn test_alignment() {
-    _test_pass(vec![(format!("x"), vec![1, 2, 3]); 1024]);
+    _test_pass(vec![("x".to_string(), vec![1, 2, 3]); 1024]);
 }
 #[test]
 fn test_alignment_128() {
-    _test_pass(vec![(format!("x"), vec![1u128, 2, 3]); 1024]);
+    _test_pass(vec![("x".to_string(), vec![1u128, 2, 3]); 1024]);
 }
 #[test]
 fn test_option_box_u64() {
@@ -48,7 +48,7 @@ fn test_string_pass() {
 }
 #[test]
 fn test_vec_u_s_pass() {
-    _test_pass(vec![vec![(0u64, format!("grawwwwrr!")); 32]; 32]);
+    _test_pass(vec![vec![(0u64, "grawwwwrr!".to_string()); 32]; 32]);
 }
 
 #[test]
@@ -65,7 +65,7 @@ fn test_string_fail() {
 }
 #[test]
 fn test_vec_u_s_fail() {
-    _test_fail(vec![vec![(0u64, format!("grawwwwrr!")); 32]; 32]);
+    _test_fail(vec![vec![(0u64, "grawwwwrr!".to_string()); 32]; 32]);
 }
 
 #[test]
@@ -78,7 +78,7 @@ fn test_opt_vec_size() {
 }
 #[test]
 fn test_alignment_size() {
-    _test_size(vec![(format!("x"), vec![1, 2, 3]); 1024]);
+    _test_size(vec![("x".to_string(), vec![1, 2, 3]); 1024]);
 }
 #[test]
 fn test_option_box_u64_size() {
@@ -106,14 +106,14 @@ fn test_string_size() {
 }
 #[test]
 fn test_vec_u_s_size() {
-    _test_size(vec![vec![(0u64, format!("grawwwwrr!")); 32]; 32]);
+    _test_size(vec![vec![(0u64, "grawwwwrr!".to_string()); 32]; 32]);
 }
 
 #[test]
 fn test_phantom_data_for_non_abomonatable_type() {
     use std::marker::PhantomData;
     struct NotAbomonatable;
-    _test_pass(PhantomData::<NotAbomonatable>::default());
+    _test_pass(PhantomData::<NotAbomonatable>);
 }
 
 fn _test_pass<T: Abomonation + Eq>(record: T) {
@@ -124,7 +124,7 @@ fn _test_pass<T: Abomonation + Eq>(record: T) {
     {
         let (result, rest) = unsafe { decode::<T>(&mut bytes[..]) }.unwrap();
         assert!(&record == result);
-        assert!(rest.len() == 0);
+        assert!(rest.is_empty());
     }
 }
 
@@ -172,7 +172,7 @@ fn test_macro() {
     // decode a &Vec<(u64, String)> from binary data
     if let Some((result, rest)) = unsafe { decode::<MyStruct>(&mut bytes) } {
         assert!(result == &record);
-        assert!(rest.len() == 0);
+        assert!(rest.is_empty());
     }
 }
 
@@ -251,7 +251,7 @@ fn test_multiple_encode_decode() {
     let (t, r) = unsafe { decode::<Vec<i32>>(r) }.unwrap();
     assert!(*t == vec![1, 2, 3]);
     let (t, _r) = unsafe { decode::<String>(r) }.unwrap();
-    assert!(*t == "grawwwwrr".to_owned());
+    assert!(t == "grawwwwrr");
 }
 
 #[test]

@@ -86,7 +86,7 @@ impl<T: Abomonation, S: DerefMut<Target = [u8]>> Abomonated<T, S> {
     /// }
     /// ```
     ///
-    /// #Safety
+    /// # Safety
     ///
     /// The type `S` must have its bytes at a fixed location, which will
     /// not change if the `bytes: S` instance is moved. Good examples are

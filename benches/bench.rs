@@ -62,25 +62,31 @@ fn string20_dec(bencher: &mut Bencher) {
 
 #[bench]
 fn vec_u_s_enc(bencher: &mut Bencher) {
-    _bench_enc(bencher, vec![vec![(0u64, format!("grawwwwrr!")); 32]; 32]);
+    _bench_enc(
+        bencher,
+        vec![vec![(0u64, "grawwwwrr!".to_string()); 32]; 32],
+    );
 }
 #[bench]
 fn vec_u_s_dec(bencher: &mut Bencher) {
-    _bench_dec(bencher, vec![vec![(0u64, format!("grawwwwrr!")); 32]; 32]);
+    _bench_dec(
+        bencher,
+        vec![vec![(0u64, "grawwwwrr!".to_string()); 32]; 32],
+    );
 }
 
 #[bench]
 fn vec_u_vn_s_enc(bencher: &mut Bencher) {
     _bench_enc(
         bencher,
-        vec![vec![(0u64, vec![(); 1 << 40], format!("grawwwwrr!")); 32]; 32],
+        vec![vec![(0u64, vec![(); 1 << 40], "grawwwwrr!".to_string()); 32]; 32],
     );
 }
 #[bench]
 fn vec_u_vn_s_dec(bencher: &mut Bencher) {
     _bench_dec(
         bencher,
-        vec![vec![(0u64, vec![(); 1 << 40], format!("grawwwwrr!")); 32]; 32],
+        vec![vec![(0u64, vec![(); 1 << 40], "grawwwwrr!".to_string()); 32]; 32],
     );
 }
 

@@ -8,7 +8,7 @@ use test::Bencher;
 
 #[bench]
 fn bench_populate(b: &mut Bencher) {
-    b.iter(|| Log::new());
+    b.iter(Log::new);
 }
 
 #[bench]
@@ -437,5 +437,11 @@ impl Log {
             bytes_dlv: 123456,
             ray_id: "10c73629cce30078-LAX".to_owned(),
         }
+    }
+}
+
+impl Default for Log {
+    fn default() -> Self {
+        Self::new()
     }
 }
