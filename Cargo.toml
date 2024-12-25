@@ -13,8 +13,8 @@ keywords = ["abomonation"]
 license = "MIT"
 
 [dependencies]
-cranelift-entity = {version = "0.68", optional = true}
-indexmap = { version = "1.4", optional = true}
+cranelift-entity = {version = "0.115", optional = true}
+indexmap = { version = "2.7", optional = true}
 
 [dev-dependencies]
 recycler="0.1.4"
